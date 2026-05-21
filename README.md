@@ -75,22 +75,23 @@ wallet-transfer-service/
 │   ├── repository/                 # SQL only. Methods accept pgx.Tx; never open their own.
 │   │   ├── postgres.go             # pool + error-class detection (unique/FK/check violations)
 │   │   ├── transfer_repo.go        # INSERT, SELECT FOR UPDATE, conditional UPDATE
-│   │   ├── wallet_repo.go          # sorted FOR UPDATE locking (Race 3 prevention)
+│   │   ├── wallet_repo.go          # sorted FOR UPDATE locking (Race prevention)
 │   │   └── ledger_repo.go          # double-entry pair insertion
 │   ├── service/                    # business logic, orchestration, idempotency, transactions
 │   │   ├── transfer_service.go     # T1 / T2 / REPLAY algorithm (§7 of DESIGN.md)
 │   │   └── hash.go                 # canonical payload hash for I9 (key-reuse detection)
 │   └── handler/                    # thin HTTP: validation + transport mapping. No logic.
-│       ├── transfer_handler.go     # POST /transfers + error→status code mapping
+│       ├── transfer_handler.go     # POST /transfers + Read endpoints + error→status code mapping
 │       └── server.go               # chi router + middleware
-├── migrations/001_init.sql         # schema, verbatim translation of §4 of DESIGN.md
+├── migrations/001_init.sql         # schema, translation of DB_DESIGN
 ├── tests/                          # integration + concurrency tests against real Postgres
 │   ├── helpers_test.go             # DB setup, seed fixtures, assertInvariants() helper
 │   ├── integration_test.go         # happy path, idempotency replay, 409, 404, validation
 │   └── concurrency_test.go         # I4 overdraft, I8 idempotency race, crossing transfers
 ├── docker-compose.yml              # local Postgres for dev + tests
 ├── Makefile                        # up / down / test / run
-├── DESIGN.md                       # design doc (read this first)
+├── SYSTEM_DESIGN_DOC.md            # system design doc (read this first)
+├── SYSTEM_INVARIANTS.md            # system invariants (read this for the spec of correctness)
 └── go.mod
 ```
 
@@ -104,7 +105,7 @@ The architecture follows the brief's prescribed layering strictly:
 
 ## The algorithm in one screen
 
-For the full reasoning see §6–§9 of `DESIGN.md`. The implementation in `internal/service/transfer_service.go` is a direct translation.
+For the full reasoning see §6–§9 of `SYSTEM_DESIGN_DOC.md`. The implementation in `internal/service/transfer_service.go` is a direct translation.
 
 ```
 POST /transfers
@@ -166,7 +167,7 @@ If any concurrency test commits a corrupt state, the invariant check fails the t
 
 ## Schema notes
 
-See `migrations/001_init.sql` for the verbatim DDL.
+See `migrations/001_init.sql` for the implementation DDL.
 
 **Decisions worth knowing:**
 
@@ -175,7 +176,7 @@ See `migrations/001_init.sql` for the verbatim DDL.
 - `ledger_entries` has both `UNIQUE (transfer_id, direction)` and `UNIQUE (transfer_id, wallet_id)` — the first makes "exactly one DEBIT + one CREDIT per transfer" a structural invariant.
 - `wallets.balance` and `ledger_entries.balance_after` both have `CHECK >= 0` as the final backstop on I4/I5.
 - Partial index `ix_transfers_pending` serves the recovery worker — only PENDING rows are indexed.
-- `idempotency_records` is merged into `transfers` as a `UNIQUE` column. The brief suggests a separate table; we merged because for a single-endpoint service the key maps 1:1 to a transfer aggregate and the separate table would carry only foreign keys. Rationale is in `DESIGN.md` §9.
+- `idempotency_records` is merged into `transfers` as a `UNIQUE` column. The brief suggests a separate table; we merged because for a single-endpoint service the key maps 1:1 to a transfer aggregate and the separate table would carry only foreign keys. Rationale is in `SYSTEM_DESIGN_DOC.md` §9.
 
 ---
 
@@ -183,7 +184,7 @@ See `migrations/001_init.sql` for the verbatim DDL.
 
 Pessimistic row-level locks (`SELECT ... FOR UPDATE`) at `READ COMMITTED` isolation, with **deterministic lock order** on wallet rows by ascending ID. The wallet repository sorts internally, so callers cannot accidentally break the invariant.
 
-This eliminates the four race conditions enumerated in §8 of `DESIGN.md`:
+This eliminates the four race conditions enumerated in §8 of `SYSTEM_DESIGN_DOC.md`:
 1. **Duplicate idempotency key** → `UNIQUE` constraint serializes T1.
 2. **Concurrent drains on one wallet** → `FOR UPDATE` on wallet serializes; balance CHECK as backstop.
 3. **Crossing transfers (A→B, B→A)** → sorted lock order eliminates deadlock.
@@ -193,30 +194,31 @@ This eliminates the four race conditions enumerated in §8 of `DESIGN.md`:
 
 ---
 ## AI usage:
-I used Claude code, extensively for implementation but also during the research along with it, I used blogs from Stripe, Square, and some blogs on Notion on how they implement transfers. 
-Along with that I did use CoPilot and Claude for code generation, but mostly around boilerplate code, write tests, logs and adding descriptive comments after the research on the design doc
-was locked in. Following things were not AI generated:
+I used Claude code, extensively not just for implementation but also during the research for it, along with tech-docs from Stripe, Square, and 
+some blogs on Notion on how they implement transfers. 
+I did use GitHub CoPilot and Claude for code generation, but it was mostly around boilerplate code, write tests, logs and adding descriptive comments
+after the research on the design doc was locked in. Following items were not AI generated:
 1. The architectural choice of pessimistic locking vs. optimistic locking.
 2. The choice to merge idempotency_records into transfers.
-3. The choice to drop currency, drop the audit table(idempotency_entries), Make the DB design minimal to focus on the core transfer algorithm.
+3. The choice to drop currency, Make the DB design minimal to focus on the core transfer algorithm.
 4. The Idempotency-Key-as-header decision. And how to use it for both replay detection and payload hash storage without a separate table.
 5. The first round of implementation of wallet/transfer handler, service, repository, and domain design. 
 6. The TDD style of development.
 
 Following things were AI generated:
-1. The second round of implementation, after the design doc was locked in and the first round of implementation was done.
-2. SQL queries, after the DB schema was designed and locked in.
-3. Tests, after the test cases were designed and locked in.
-4. The verbose README and explain the Design Doc, after the core design and initial implementation were locked in.
+1. SQL queries, after the DB schema was designed and locked in. 
+2. The consecutive round of implementation, after the design doc was locked in and the first round of implementation was done.
+3. Tests, after the test cases were thought through and locked in.
+4. The verbose README and explaination of the Design/Invariant Doc, after the core design and implementation were locked in.
 
 ## Out of scope
-
-As per the brief's "focus on correctness and clarity, not feature completeness" — see §17 of `DESIGN.md` for the full list. Highlights:
+As per the brief's "focus on correctness and clarity, not feature completeness" — see §17 of `SYSTEM_DESIGN_DOC.md` for the full list. Highlights:
 
 - Wallet creation endpoint (wallets are seeded via SQL in this submission).
 - `GET /transfers/{id}` (Optional Enhancement, not implemented).
-- Multi-currency.
+- Multi-currency. (Can be added by adding a `currency` column to `wallets`, `transfers`, and `ledger_entries`, and enforcing currency consistency in the service layer.)
 - Transactional outbox for webhooks.
 - Auth, rate limiting.
-- Production observability (designed in §15 of `DESIGN.md`, not built).
+- Production observability (designed in §14 of `SYSTEM_DESIGN_DOC.md`, not built).
+- Comprehensive reconciliation and drift monitoring against the ledger is out of scope; a scheduler for that would be a production addition.
 - Error handling, and logging is minimal and not structured and at places gives out implementation details (e.g. "T2 invariant violation") — this is intentional to keep the focus on the core algorithm and not on production readiness.
