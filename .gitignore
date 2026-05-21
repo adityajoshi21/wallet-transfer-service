@@ -1,0 +1,15 @@
+bin/
+*.test
+*.out
+*.exe
+.idea/
+.vscode/
+*.log
+.DS_Store
+
+# Build artifacts
+/wallet-transfer-service
+
+# Local env files
+.env
+.env.local
