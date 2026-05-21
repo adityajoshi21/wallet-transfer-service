@@ -220,5 +220,5 @@ As per the brief's "focus on correctness and clarity, not feature completeness" 
 - Transactional outbox for webhooks.
 - Auth, rate limiting.
 - Production observability (designed in §14 of `SYSTEM_DESIGN_DOC.md`, not built).
-- Comprehensive reconciliation and drift monitoring against the ledger is out of scope; a scheduler for that would be a production addition.
+- Comprehensive reconciliation and drift monitoring against the ledger is out of scope; that would be a production addition.
 - Error handling, and logging is minimal and not structured and at places gives out implementation details (e.g. "T2 invariant violation") — this is intentional to keep the focus on the core algorithm and not on production readiness.
