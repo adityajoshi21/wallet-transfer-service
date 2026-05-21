@@ -15,7 +15,7 @@ Full design document lives in [`SYSTEM_DESIGN_DOC.md`](./SYSTEM_DESIGN_DOC.md). 
 make up
 
 # 2. Run the test suite.
-make test          # unit + integration + concurrency
+make test          # unit + integration + concurrency + regression
 
 # 3. Run the server.
 make run           # listens on :8080
