@@ -2,7 +2,7 @@
 
 A reliable, idempotent, double-entry wallet-to-wallet transfer service built in Go + PostgreSQL.
 
-Full design document lives in [`DESIGN.md`](./DESIGN.md). This README is for getting it running and oriented in the code.
+Full design document lives in [`SYSTEM_DESIGN_DOC.md`](./SYSTEM_DESIGN_DOC.md). This README is for getting it running and oriented in the code.
 
 ---
 
